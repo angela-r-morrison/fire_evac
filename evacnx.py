@@ -290,6 +290,7 @@ def time_expand_with_removal_dyn(G, ten, time_int_size, prev_T, curr_T,**kwargs)
     orig_nodes = list(G.nodes)
     orig_edges = list(G.edges)
     ten_copy = ten.copy()
+    percent_cap = 1
     removed_nodes_mat = kwargs.get('removed_nodes_mat',[ [] for _ in range(curr_T)])
     edge_dist_mat = kwargs.get('edge_distance_mat',[ {} for _ in range(curr_T)])
     output = kwargs.get('verbose', False)
@@ -341,14 +342,14 @@ def time_expand_with_removal_dyn(G, ten, time_int_size, prev_T, curr_T,**kwargs)
                     ### deteremine the capacipty the edge can have based on dist to fire
                     if (i,j,k) in edge_dist_mat[m]:
                         if (i,j,k) in edge_dist_mat[m]:
-                        if edge_dist_mat[m][(i,j,k)]/time_int_end < lb_percent:
-                            percent_cap = 0
-                        elif edge_dist_mat[m][(i,j,k)] >= time_int_end:
-                            percent_cap = 1
+                            if edge_dist_mat[m][(i,j,k)]/time_int_end < lb_percent:
+                                percent_cap = 0
+                            elif edge_dist_mat[m][(i,j,k)] >= time_int_end:
+                                percent_cap = 1
+                            else:
+                                percent_cap = edge_dist_mat[m][(i,j,k)]/time_int_end
                         else:
-                            percent_cap = edge_dist_mat[m][(i,j,k)]/time_int_end
-                    else:
-                        percent_cap = 1
+                            percent_cap = 1
                     
                     if prev_T == 0 or (node_num)+(j-i)+(len(orig_nodes)*time_int_end) in new_nodes:
                         if (node_num,(node_num)+(j-i)+(len(orig_nodes)*time_int_end)) in ten_copy.edges:
@@ -483,6 +484,7 @@ def det_num_int(G, pop, fire_orig_radii, **kwargs):
     '''
     T = kwargs.get('T', 0)
     step_size = kwargs.get('step_size', 1)
+    time_int_len = kwargs.get('time_int_len', 1)
     output = kwargs.get('verbose', False)
     lb_percent = kwargs.get('lb_percent', 0.2)
     safe_est = kwargs.get('safe_est', True)
@@ -495,6 +497,7 @@ def det_num_int(G, pop, fire_orig_radii, **kwargs):
     longest_shortest_path = None
     supply_amt = 0
     demand_amt = 0
+    init_T = T
     
     ### determine if problem will have a solution
     start = time.time()
@@ -519,43 +522,45 @@ def det_num_int(G, pop, fire_orig_radii, **kwargs):
 
         # Iterate over each source
         for source in sup_nodes:
-        # Compute the shortest path lengths from the source to all nodes
-        shortest_paths_lengths = nx.single_source_dijkstra_path_length(G, source, weight = 'travel_time')
+            # Compute the shortest path lengths from the source to all nodes
+            shortest_paths_lengths = nx.single_source_dijkstra_path_length(G, source, weight = 'travel_time')
         
-        # Iterate over each sink
-        for sink in dem_nodes:
-            # Check if there is a path from source to sink
-            if sink in shortest_paths_lengths:
-                # Get the shortest path length to this sink
-                path_length = shortest_paths_lengths[sink]
+            # Iterate over each sink
+            for sink in dem_nodes:
+                # Check if there is a path from source to sink
+                if sink in shortest_paths_lengths:
+                    # Get the shortest path length to this sink
+                    path_length = shortest_paths_lengths[sink]
                 
-                # Update if this is the longest shortest path found so far
-                if path_length > max_shortest_path_length:
-                    max_shortest_path_length = path_length
-                    # Get the actual path as well
-                    longest_shortest_path = nx.shortest_path(G, source=source, target=sink, weight='travel_time')
+                    # Update if this is the longest shortest path found so far
+                    if path_length > max_shortest_path_length:
+                        max_shortest_path_length = path_length
+                        # Get the actual path as well
+                        longest_shortest_path = nx.shortest_path(G, source=source, target=sink, weight='travel_time')
 
         end = time.time()
         if output:
+            # print(max_shortest_path_length)
+            # print(longest_shortest_path)
             print(f'Longest Shortest Path Deteremined: {end-start} seconds')
 
-    ###deteremine how many travel times were rounded in creation of TEN
-    if not safe_est:
-        num_rnd_ints = 0
-        for i in range(len(longest_shortest_path)-1):
-            edges = G.get_edge_data(longest_shortest_path[i], longest_shortest_path[i+1])
-            min_travel_time = min(edge_data['travel_time'] for edge_data in edges.values())
-            if min_travel_time != math.ceil(min_travel_time):
-                num_rnd_ints +=1 
-        end = time.time() 
+        ###deteremine how many travel times were rounded in creation of TEN
+        if not safe_est:
+            num_rnd_ints = 0
+            for i in range(len(longest_shortest_path)-1):
+                edges = G.get_edge_data(longest_shortest_path[i], longest_shortest_path[i+1])
+                min_travel_time = min(edge_data['travel_time'] for edge_data in edges.values())
+                if min_travel_time != math.ceil(min_travel_time):
+                    num_rnd_ints +=1 
+        # end = time.time() 
                 
 
-    time_int_len = kwargs.get('time_int_len', 1)
-    if safe_est:
-        init_T= math.ceil((((max_shortest_path_length/60))+len(longest_shortest_path))/time_int_len) ###time zero is when num_time_ints = 1
-    else:
-        init_T= math.ceil((((max_shortest_path_length/60))+num_rnd_ints)/time_int_len) ###time zero is when num_time_ints = 1
-    T = init_T
+    
+        if safe_est:
+            init_T= math.ceil((((max_shortest_path_length/60))+len(longest_shortest_path))/time_int_len) ###time zero is when num_time_ints = 1
+        else:
+            init_T= math.ceil((((max_shortest_path_length/60))+num_rnd_ints)/time_int_len) ###time zero is when num_time_ints = 1
+        T = init_T
     prev_T = 0
 
     T_0 = sum([math.ceil(data['travel_time']) for _,_,data in G.edges(data=True)])
@@ -653,6 +658,8 @@ def update_ten(full_ten, G, removed_nodes_mat, edge_dist_mat, time_int_update, T
     Output:
     part_ten: a truncated version of full_ten based on when what time instance the inital plan is updated
     '''
+
+    percent_cap = 1
     output = kwargs.get('verbose', False)
     lb_percent = kwargs.get('lb_percent', 0.2)
 
@@ -718,14 +725,14 @@ def update_ten(full_ten, G, removed_nodes_mat, edge_dist_mat, time_int_update, T
                     ### deteremine the capacipty the edge can have based on dist to fire
                     if (i,j) in edge_dist_mat[m]:
                         if (i,j) in edge_dist_mat[m]:
-                        if edge_dist_mat[m][(i,j)]/time_int_end < lb_percent:
-                            percent_cap = 0
-                        elif edge_dist_mat[m][(i,j)] >= time_int_end:
-                            percent_cap = 1
+                            if edge_dist_mat[m][(i,j)]/time_int_end < lb_percent:
+                                percent_cap = 0
+                            elif edge_dist_mat[m][(i,j)] >= time_int_end:
+                                percent_cap = 1
+                            else:
+                                percent_cap = edge_dist_mat[m][(i,j)]/time_int_end
                         else:
-                            percent_cap = edge_dist_mat[m][(i,j)]/time_int_end
-                    else:
-                        percent_cap = 1
+                            percent_cap = 1
 
                     if (node_num,(node_num)+(j-i)+(len(orig_nodes)*time_int_end)) in part_ten.edges:
                         part_ten[node_num][(node_num)+(j-i)+(len(orig_nodes)*time_int_end)]['upper'] += math.floor(G[i][j]['upper']*percent_cap)
@@ -787,7 +794,7 @@ def merge_flow_dicts(dict1, dict2):
     return merged_dict
 
 def evac_update(full_ten_s_t, G, orig_removed_nodes_mat, orig_edge_dist_mat, orig_fire_poly_mat, time_int_update, fire_time_int, T, 
-                fire_orig_radii, flow_dict, pop, max_T,**kwargs):
+                fire_orig_radii, flow_dict,**kwargs):
     '''
     Inputs:
     full_ten_s_t: NetworkX DiGraph of time-expanded network without fire used in construction
@@ -816,6 +823,8 @@ def evac_update(full_ten_s_t, G, orig_removed_nodes_mat, orig_edge_dist_mat, ori
     time_int_size = kwargs.get('time_int_size', 1)
     step_size = kwargs.get('step_size', 1)
     output = kwargs.get('verbose',False)
+    pop = kwargs.get('pop', 1)
+    max_T = kwargs.get('max-T', T+1)
 
     start = time.time()
 
